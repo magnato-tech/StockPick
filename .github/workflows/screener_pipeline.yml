@@ -1,0 +1,51 @@
+name: Ukentlig Aksje Screener Pipeline
+
+on:
+  # Kjører jobben hver mandag kl. 06:00 UTC (07:00 Oslo vinter/08:00 sommer)
+  schedule:
+    - cron: '0 6 * * 1'
+  # Tillater manuell kjøring fra GitHub UI for testing
+  workflow_dispatch:
+
+permissions:
+  # Nødvendig for å kunne opprette/oppdatere GitHub Releases assets
+  contents: write 
+
+jobs:
+  run_screener:
+    runs-on: ubuntu-latest
+    steps:
+    - name: ⬇️ Sjekk ut kode
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Sett opp Python Miljø
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 Installer Python-avhengigheter
+      # Dette er alle bibliotekene fra requirements.txt, pluss lxml/html5lib for Wikipedia-henting
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy yfinance requests altair lxml html5lib
+        
+    - name: ⚙️ Kjør Screening Motor (Oppretter CSV-filer)
+      run: |
+        python screener_motor.py
+        
+    - name: 📤 Publiser CSV til GitHub Release (latest + historikk)
+      # Bruker softprops/action-gh-release for å enkelt oppdatere assets i en Release
+      uses: softprops/action-gh-release@v1
+      with:
+        # En stabil tag for Streamlit-appen å peke på
+        tag_name: latest-screener-data
+        name: Siste Toppkandidater
+        draft: false
+        prerelease: false
+        # Laster opp begge filene generert av screener_motor.py
+        files: |
+          top_candidates_latest.csv
+          top_candidates_*.csv 
+      env:
+        # Bruker den innebygde GITHUB_TOKEN for autorisasjon
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
