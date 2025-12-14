@@ -9,7 +9,7 @@ on:
 
 permissions:
   # Nødvendig for å kunne opprette/oppdatere GitHub Releases assets
-  contents: write 
+  contents: write
 
 jobs:
   run_screener:
@@ -17,22 +17,29 @@ jobs:
     steps:
     - name: ⬇️ Sjekk ut kode
       uses: actions/checkout@v4
-      
+
     - name: 🐍 Sett opp Python Miljø
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        
+
     - name: 📦 Installer Python-avhengigheter
       # Dette er alle bibliotekene fra requirements.txt, pluss lxml/html5lib for Wikipedia-henting
       run: |
         python -m pip install --upgrade pip
         pip install pandas numpy yfinance requests altair lxml html5lib
-        
+
     - name: ⚙️ Kjør Screening Motor (Oppretter CSV-filer)
       run: |
         python screener_motor.py
-        
+
+    - name: 🔎 Debug - finn genererte CSV-filer
+      run: |
+        echo "PWD=$(pwd)"
+        ls -lah
+        echo "Searching for top_candidates*.csv ..."
+        find . -maxdepth 4 -type f -name "top_candidates*.csv" -print
+
     - name: 📤 Publiser CSV til GitHub Release (latest + historikk)
       # Bruker softprops/action-gh-release for å enkelt oppdatere assets i en Release
       uses: softprops/action-gh-release@v1
@@ -45,7 +52,8 @@ jobs:
         # Laster opp begge filene generert av screener_motor.py
         files: |
           top_candidates_latest.csv
-          top_candidates_*.csv 
+          top_candidates_*.csv
+        fail_on_unmatched_files: true
       env:
         # Bruker den innebygde GITHUB_TOKEN for autorisasjon
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
