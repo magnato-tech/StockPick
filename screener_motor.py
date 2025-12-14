@@ -411,12 +411,12 @@ def export_results(df: pd.DataFrame):
     asof_date = df['asof_date'].iloc[0]
     
     # Latest fil (overskrives)
-    latest_filename = "top_candidates_latest.csv"
+    latest_filename = "./top_candidates_latest.csv" # <-- Fiks: Lagt til './'
     df.to_csv(latest_filename, index=False)
     print(f"Latest fil skrevet: {latest_filename}")
     
     # Historikk fil (dato-stemplet)
-    history_filename = f"top_candidates_{asof_date}.csv"
+    history_filename = f"./top_candidates_{asof_date}.csv" # <-- Fiks: Lagt til './'
     df.to_csv(history_filename, index=False)
     print(f"Historikk-fil skrevet: {history_filename}")
         
