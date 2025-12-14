@@ -400,28 +400,50 @@ def run_full_screener():
     
     return final_df[output_cols]
 
-# --- EKSPORT ---
+# --- EKSPORT (OPPDATERT FOR ROBUSTHET) ---
 
 def export_results(df: pd.DataFrame):
-    """Lagrer latest CSV og en datostemplet CSV til disk for GitHub Actions."""
-    if df.empty:
-        print("Ingen kandidater funnet. Skriver ikke fil.")
-        return
+    """
+    Lagrer latest CSV og en datostemplet CSV til disk for GitHub Actions.
+    Viktig: Skriver ALLTID latest-fila (også når df er tom), slik at Streamlit aldri får 404.
+    """
+    expected_cols = [
+        'asof_date', 'run_id', 'ticker', 'name', 'sector', 'total_score',
+        'vb_percentile', 'mom_percentile', 'vol_percentile',
+        'optimal_sl_train', 'cagr_test_percent', 'max_drawdown_test',
+        'why_selected'
+    ]
 
-    asof_date = df['asof_date'].iloc[0]
-    
-    # Latest fil (overskrives)
-    latest_filename = "./top_candidates_latest.csv" # <-- Fiks: Lagt til './'
-    df.to_csv(latest_filename, index=False)
+    now = pd.Timestamp.now()
+    asof_date = now.strftime('%Y-%m-%d')
+
+    if df is None or df.empty:
+        print("Ingen kandidater funnet. Skriver tom CSV (for å unngå 404 i Streamlit).")
+        df_out = pd.DataFrame(columns=expected_cols)
+        # valgfritt: legg på asof_date/run_id som kolonner selv om det ikke er rader
+        df_out['asof_date'] = df_out.get('asof_date', pd.Series(dtype=str))
+        df_out['run_id'] = df_out.get('run_id', pd.Series(dtype=str))
+    else:
+        df_out = df.copy()
+        # sørg for at forventede kolonner finnes (Streamlit forventer disse)
+        for c in expected_cols:
+            if c not in df_out.columns:
+                df_out[c] = np.nan
+
+        # asof_date brukes til historikkfil
+        asof_date = str(df_out['asof_date'].iloc[0]) if 'asof_date' in df_out.columns and len(df_out) > 0 else asof_date
+
+    # Filbanefiks: Bruk './' for å tvinge lagring til rotkatalogen
+    latest_filename = "./top_candidates_latest.csv"
+    df_out.to_csv(latest_filename, index=False)
     print(f"Latest fil skrevet: {latest_filename}")
-    
-    # Historikk fil (dato-stemplet)
-    history_filename = f"./top_candidates_{asof_date}.csv" # <-- Fiks: Lagt til './'
-    df.to_csv(history_filename, index=False)
+
+    history_filename = f"./top_candidates_{asof_date}.csv"
+    df_out.to_csv(history_filename, index=False)
     print(f"Historikk-fil skrevet: {history_filename}")
-        
+
     print("--- Pipeline Fullført. ---")
-    
+
 
 if __name__ == '__main__':
     final_result_df = run_full_screener()
