@@ -1,7 +1,7 @@
 name: Ukentlig Aksje Screener Pipeline
 
 on:
-  # Kjører jobben hver lørdag kl. 06:00 UTC (07:00 Oslo vinter/08:00 sommer)
+  # Kjører jobben hver lørdag kl. 06:00 UTC (07:00 Oslo vinter / 08:00 sommer)
   schedule:
     - cron: '0 6 * * 6'
   # Tillater manuell kjøring fra GitHub UI for testing
@@ -13,43 +13,47 @@ permissions:
 jobs:
   run_screener:
     runs-on: ubuntu-latest
+
     steps:
-    - name: ⬇️ Sjekk ut kode
-      uses: actions/checkout@v4
+      - name: ⬇️ Sjekk ut kode
+        uses: actions/checkout@v4
 
-    - name: 🐍 Sett opp Python Miljø
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: 🐍 Sett opp Python-miljø
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: 📦 Installer Python-avhengigheter
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy yfinance requests altair lxml html5lib
+      - name: 📦 Installer Python-avhengigheter
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy yfinance requests altair lxml html5lib
 
-    - name: ⚙️ Kjør Screening Motor (Oppretter CSV-filer)
-      run: |
-        python screener_motor.py
+      - name: ⚙️ Kjør Screening Motor (oppretter CSV-filer)
+        run: |
+          python screener_motor.py
 
-    - name: 🔎 Debug - finn genererte CSV-filer
-      run: |
-        echo "PWD=$(pwd)"
-        ls -lah
-        echo "Searching for top_candidates*.csv ..."
-        find . -maxdepth 4 -type f -name "top_candidates*.csv" -print
+      - name: 🔎 Debug – finn genererte CSV-filer
+        run: |
+          echo "PWD=$(pwd)"
+          ls -lah
+          echo "Searching for top_candidates*.csv ..."
+          find . -maxdepth 4 -type f -name "top_candidates*.csv" -print
 
-    - name: 📤 Publiser CSV til GitHub Release (latest + historikk)
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: latest-screener-data
-        name: Siste Toppkandidater
-        draft: false
-        prerelease: false
-        overwrite: true
-        create_latest: true # <-- DEN KRITISKE LINJEN SOM FIKSER 404 VED FØRSTE GANG
-        files: |
-          top_candidates_latest.csv
-          top_candidates_*.csv
-        fail_on_unmatched_files: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 📤 Publiser CSV til GitHub Release (latest + historikk)
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest-screener-data
+          name: Siste Toppkandidater
+          draft: false
+          prerelease: false
+
+          # Matcher nøyaktig:
+          # - top_candidates_latest.csv
+          # - top_candidates_YYYY-MM-DD.csv
+          files: |
+            top_candidates_latest.csv
+            top_candidates_20??-??-??.csv
+
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
