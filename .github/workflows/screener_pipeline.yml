@@ -1,9 +1,9 @@
 name: Ukentlig Aksje Screener Pipeline
 
 on:
-  # Kjører jobben hver mandag kl. 06:00 UTC (07:00 Oslo vinter/08:00 sommer)
+  # Kjører jobben hver lørdag kl. 06:00 UTC (07:00 Oslo vinter/08:00 sommer)
   schedule:
-    - cron: '0 6 * * 1'
+    - cron: '0 6 * * 6' # <-- ENDRET TIL LØRDAG (6)
   # Tillater manuell kjøring fra GitHub UI for testing
   workflow_dispatch:
 
@@ -49,6 +49,8 @@ jobs:
         name: Siste Toppkandidater
         draft: false
         prerelease: false
+        # VIKTIG FIKS: Sikrer at filen blir OVERWRITTEN i releasen, som er essensielt for å unngå caching-problemer
+        overwrite: true # <-- NY LINJE
         # Laster opp begge filene generert av screener_motor.py
         files: |
           top_candidates_latest.csv
