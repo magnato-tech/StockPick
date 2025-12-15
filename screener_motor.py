@@ -419,13 +419,14 @@ def export_results(df: pd.DataFrame):
 
     if df is None or df.empty:
         print("Ingen kandidater funnet. Skriver tom CSV (for å unngå 404 i Streamlit).")
+        # Oppretter en tom DataFrame med riktige kolonner (kontrakten)
         df_out = pd.DataFrame(columns=expected_cols)
-        # valgfritt: legg på asof_date/run_id som kolonner selv om det ikke er rader
-        df_out['asof_date'] = df_out.get('asof_date', pd.Series(dtype=str))
-        df_out['run_id'] = df_out.get('run_id', pd.Series(dtype=str))
+        # Legger på kjøringsinformasjon (tomme kolonner)
+        df_out['asof_date'] = pd.Series(dtype=str)
+        df_out['run_id'] = pd.Series(dtype=str)
     else:
         df_out = df.copy()
-        # sørg for at forventede kolonner finnes (Streamlit forventer disse)
+        # Sikrer at forventede kolonner finnes (Streamlit forventer disse)
         for c in expected_cols:
             if c not in df_out.columns:
                 df_out[c] = np.nan
