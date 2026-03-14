@@ -436,21 +436,48 @@ def run_robust_vb_simulation(df_full: pd.DataFrame) -> Dict[str, Any] | None:
 # HOVEDSCREENER
 # ============================================================
 
-def run_full_screener():
-    # 0) Pass 0: Regime Check (kun informativt)
-    print("\n--- 0. Pass 0: Regime Check ---")
+def _yf_download_single(ticker: str, period: str = "1y") -> pd.DataFrame | None:
+    """
+    Laster ned data for én ticker via yf.Ticker().history() (mer pålitelig enn
+    yf.download() fra GitHub Actions, som ofte blokkeres av Yahoo Finance).
+    Returnerer DataFrame med standardkolonner eller None ved feil.
+    """
     try:
-        idx_data         = yf.download(MARKET_INDEX_TICKER, period="2y", interval="1d", progress=False)
-        idx_data["SMA200"] = idx_data["Close"].rolling(200).mean()
-        idx_close        = float(idx_data["Close"].iloc[-1])
-        idx_sma200       = float(idx_data["SMA200"].iloc[-1])
+        t   = yf.Ticker(ticker)
+        df  = t.history(period=period, interval="1d", auto_adjust=True)
+        if df is None or df.empty:
+            return None
+        # Standardiser kolonnenavn (yfinance returnerer Open/High/Low/Close/Volume)
+        df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+        df = df.dropna(how="all")
+        return df if not df.empty else None
+    except Exception:
+        return None
 
-        if pd.isna(idx_sma200) or idx_close < idx_sma200:
-            print("MARKNEDSREGIME: Bearish/Ubestemt. Fortsetter screening likevel.")
+
+def run_full_screener():
+    # 0) Pass 0: Regime Check + yfinance-diagnose
+    print("\n--- 0. Pass 0: Regime Check + yfinance-test ---")
+    print(f"yfinance versjon: {yf.__version__}")
+
+    spy_ok = False
+    try:
+        spy = yf.Ticker(MARKET_INDEX_TICKER)
+        idx_data = spy.history(period="2y", interval="1d", auto_adjust=True)
+        print(f"SPY rader lastet: {len(idx_data)}")
+        if not idx_data.empty:
+            idx_data["SMA200"] = idx_data["Close"].rolling(200).mean()
+            idx_close  = float(idx_data["Close"].iloc[-1])
+            idx_sma200 = float(idx_data["SMA200"].iloc[-1])
+            spy_ok = True
+            if pd.isna(idx_sma200) or idx_close < idx_sma200:
+                print("MARKNEDSREGIME: Bearish/Ubestemt. Fortsetter screening likevel.")
+            else:
+                print(f"MARKNEDSREGIME: Bullish. SPY={idx_close:.2f}, SMA200={idx_sma200:.2f}")
         else:
-            print("MARKNEDSREGIME: Bullish.")
+            print("ADVARSEL: SPY returnerte tom DataFrame – Yahoo Finance kan være blokkert!")
     except Exception as e:
-        print(f"Advarsel: Kunne ikke sjekke regime. Fortsetter. Detaljer: {e}")
+        print(f"ADVARSEL: SPY-sjekk feilet: {e}")
 
     # 1) Masterliste
     ticker_list_df = get_master_ticker_list()
@@ -465,64 +492,74 @@ def run_full_screener():
     print(f"\nStarter screening av {total_tickers} aksjer (S&P 1500).")
     print(f"Eksempel-tickers: {tickers[:5]}")
 
-    # 2) Pass 1: Gate på SMA50-cross (batch-nedlasting)
-    total_batches = (total_tickers + BATCH_SIZE - 1) // BATCH_SIZE
-    print(f"\n--- 1. Pass 1: Gate (SMA50-cross) – {total_batches} batches à {BATCH_SIZE} ---")
+    # 2) Pass 1: Gate på SMA50-cross (individuelle Ticker.history()-kall)
+    print(f"\n--- 1. Pass 1: Gate (SMA50-cross) – {total_tickers} individuelle nedlastinger ---")
     shortlist_data = []
+    n_empty = 0
+    n_tooshort = 0
+    n_price_filter = 0
+    n_gate_fail = 0
 
-    for b_start in range(0, total_tickers, BATCH_SIZE):
-        batch      = tickers[b_start : b_start + BATCH_SIZE]
-        batch_num  = b_start // BATCH_SIZE + 1
-        print(f"  Batch {batch_num}/{total_batches}: {len(batch)} tickers ...", end=" ", flush=True)
+    for i, ticker in enumerate(tickers):
+        time.sleep(SLEEP_TIME_SECONDS)
+
+        if (i + 1) % 100 == 0 or i == 0:
+            print(
+                f"  [{i+1}/{total_tickers}] shortlist={len(shortlist_data)} "
+                f"tom={n_empty} korte={n_tooshort} pris={n_price_filter} gate={n_gate_fail}",
+                flush=True,
+            )
 
         try:
-            batch_df = yf.download(
-                batch, period="1y", interval="1d",
-                progress=False, group_by="ticker", threads=True,
-            )
-        except Exception as e:
-            print(f"FEIL: {e}")
-            time.sleep(SLEEP_TIME_SECONDS)
-            continue
+            df = _yf_download_single(ticker, period="1y")
 
-        passed = 0
-        for ticker in batch:
-            try:
-                df = _get_ticker_df(batch_df, ticker)
-                if df is None or len(df) < 200:
-                    continue
-
-                # Pre-filter: pris og likviditet
-                last_close = df["Close"].iloc[-1]
-                if pd.isna(last_close) or last_close < MIN_PRICE_USD:
-                    continue
-
-                dollar_vol_50 = (df["Close"] * df["Volume"]).rolling(50).mean().iloc[-1]
-                if pd.isna(dollar_vol_50) or dollar_vol_50 < MIN_DOLLAR_VOL_USD:
-                    continue
-
-                metrics = calculate_technical_metrics(df, ticker)
-                if metrics is None:
-                    continue
-                if not metrics.get("cross50_last_n", False):
-                    continue
-                if not metrics.get("still_above_50", False):
-                    continue
-
-                meta = ticker_meta.get(ticker, {})
-                shortlist_data.append({
-                    "ticker": ticker,
-                    "name":   meta.get("name", ""),
-                    "sector": meta.get("sector", "Unknown"),
-                    **metrics,
-                })
-                passed += 1
-
-            except Exception:
+            if df is None or df.empty:
+                n_empty += 1
                 continue
 
-        print(f"{passed} passerte.")
-        time.sleep(SLEEP_TIME_SECONDS)
+            if len(df) < 200:
+                n_tooshort += 1
+                continue
+
+            # Pre-filter: pris og likviditet
+            last_close = df["Close"].iloc[-1]
+            if pd.isna(last_close) or last_close < MIN_PRICE_USD:
+                n_price_filter += 1
+                continue
+
+            dollar_vol_50 = (df["Close"] * df["Volume"]).rolling(50).mean().iloc[-1]
+            if pd.isna(dollar_vol_50) or dollar_vol_50 < MIN_DOLLAR_VOL_USD:
+                n_price_filter += 1
+                continue
+
+            metrics = calculate_technical_metrics(df, ticker)
+            if metrics is None:
+                n_gate_fail += 1
+                continue
+            if not metrics.get("cross50_last_n", False):
+                n_gate_fail += 1
+                continue
+            if not metrics.get("still_above_50", False):
+                n_gate_fail += 1
+                continue
+
+            meta = ticker_meta.get(ticker, {})
+            shortlist_data.append({
+                "ticker": ticker,
+                "name":   meta.get("name", ""),
+                "sector": meta.get("sector", "Unknown"),
+                **metrics,
+            })
+
+        except Exception as ex:
+            n_empty += 1
+            continue
+
+    print(
+        f"\nPass 1 ferdig: shortlist={len(shortlist_data)}, "
+        f"tom/feil={n_empty}, for_korte={n_tooshort}, "
+        f"pris/vol-filter={n_price_filter}, gate_fail={n_gate_fail}"
+    )
 
     shortlist_df = pd.DataFrame(shortlist_data)
     if shortlist_df.empty:
