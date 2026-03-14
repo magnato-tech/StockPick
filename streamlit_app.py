@@ -2,31 +2,32 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-
-# --- KONSTANTER ---
-GITHUB_RAW_URL = "https://github.com/magnato-tech/StockPick/releases/download/latest-screener-data/top_candidates_latest.csv"
+import os
 
 # --- KONFIGURASJON ---
+# Lokal CSV-fil generert av screener_motor.py
+CSV_PATH = os.path.join(os.path.dirname(__file__), "top_candidates_latest.csv")
+
 st.set_page_config(page_title="StockPick | Toppkandidater", layout="wide")
 st.title("🏆 StockPick: Toppkandidater for Investering")
 st.markdown(
-    "Kandidatene screenes ukentlig fra **S&P 1500** (S&P 500 + S&P 400 + S&P 600) "
+    "Kandidatene screenes fra **S&P 1500** (S&P 500 + S&P 400 + S&P 600) "
     "og rangeres etter en vektet score av **V/B-ratio**, **Momentum** og **Volum**."
 )
 
-# --- DATAHENTING (CACHE) ---
+# --- DATAHENTING ---
 
-@st.cache_data(ttl=60 * 60 * 24)
-def hent_data_fra_github():
-    """Henter CSV-resultatene fra GitHub Releases."""
+@st.cache_data(ttl=60 * 5)   # 5 minutters cache lokalt (kortere enn remote-versjon)
+def hent_data_lokalt():
+    """Leser CSV-filen generert av screener_motor.py fra disk."""
+    if not os.path.exists(CSV_PATH):
+        return pd.DataFrame(), "Filen finnes ikke ennå. Kjør screener_motor.py først."
+
     try:
-        df = pd.read_csv(
-            GITHUB_RAW_URL,
-            na_values=["", " ", "NA", "N/A", "null", "None"]
-        )
+        df = pd.read_csv(CSV_PATH, na_values=["", " ", "NA", "N/A", "null", "None"])
 
         if df.empty:
-            return df
+            return pd.DataFrame(), "CSV-filen er tom. Kjør screener_motor.py på nytt."
 
         numeric_cols = [
             "total_score",
@@ -45,58 +46,68 @@ def hent_data_fra_github():
                 df[c] = pd.to_numeric(df[c], errors="coerce")
 
         if "total_score" not in df.columns or df["total_score"].dropna().empty:
-            return pd.DataFrame()
+            return pd.DataFrame(), "Filen mangler total_score-kolonne. Kjør screener_motor.py på nytt."
 
         df = df.sort_values("total_score", ascending=False).reset_index(drop=True)
 
         # Visningskolonner
-        df["V/B Score"]      = df["vb_percentile"].round(1)
-        df["Mom Score"]      = df["mom_percentile"].round(1)
+        df["V/B Score"]       = df["vb_percentile"].round(1)
+        df["Mom Score"]       = df["mom_percentile"].round(1)
         df["Vol Score"]       = df["vol_percentile"].round(1)
         df["VB-SL (%)"]       = df["optimal_sl_train"].round(1)
         df["CAGR Test (%)"]   = df["cagr_test_percent"].round(1)
-        df["Max DD Test (%)"]  = df["max_drawdown_test"].round(1)
+        df["Max DD Test (%)"] = df["max_drawdown_test"].round(1)
         if "dynamic_sl_pct" in df.columns:
             df["ATR-SL (%)"]  = df["dynamic_sl_pct"].round(1)
         if "atr_14" in df.columns:
             df["ATR(14)"]     = df["atr_14"].round(2)
 
-        # Boolean-kolonner → lesbart symbol
         for bool_col, label in [("golden_cross", "GoldenX"), ("vol_confirmed_cross50", "VolConf")]:
             if bool_col in df.columns:
                 df[label] = df[bool_col].map(
                     lambda v: "✓" if str(v).lower() in ("true", "1", "1.0") else "–"
                 )
 
-        return df
+        return df, None
 
     except Exception as e:
-        st.error(f"Klarte ikke å laste data fra GitHub Releases: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), f"Feil ved lesing av CSV: {e}"
 
 
-# --- HOVEDAPPLOGIKK ---
+# --- LAST DATA ---
+df_results, feil_melding = hent_data_lokalt()
 
-df_results = hent_data_fra_github()
+# Knapp for å tvinge refresh (tømmer cache)
+if st.button("🔄 Oppdater data"):
+    st.cache_data.clear()
+    st.rerun()
 
 if df_results.empty:
-    st.warning("Kan ikke vise resultater akkurat nå. Sjekk at backend-pipelinen har kjørt.")
-else:
-    latest_date = df_results["asof_date"].iloc[0]
+    st.warning(f"Ingen data å vise. {feil_melding or ''}")
     st.info(
-        f"Sist oppdatert: **{latest_date}** "
-        f"(Run ID: {df_results['run_id'].iloc[0]}) "
-        f"— Univers: **S&P 1500**"
+        "**Slik genererer du data:**\n\n"
+        "Kjør følgende kommando i terminalen:\n"
+        "```\n"
+        f"python \"{os.path.abspath(os.path.join(os.path.dirname(__file__), 'screener_motor.py'))}\"\n"
+        "```\n"
+        "Screener-en tar 20–40 minutter. Trykk 'Oppdater data' når den er ferdig."
+    )
+else:
+    latest_date = df_results["asof_date"].iloc[0] if "asof_date" in df_results.columns else "ukjent"
+    mod_time    = pd.Timestamp(os.path.getmtime(CSV_PATH), unit="s").strftime("%Y-%m-%d %H:%M")
+    st.success(
+        f"Data fra: **{latest_date}** — Fil sist oppdatert: **{mod_time}** "
+        f"— **{len(df_results)} kandidater** funnet"
     )
 
     # --- SIDEBAR ---
     with st.sidebar:
         st.header("Filtrer Resultater")
 
-        sektor_valg      = ["Alle Sektorer"] + sorted(df_results["sector"].dropna().unique().tolist())
-        selected_sector  = st.selectbox("Velg Sektor:", sektor_valg)
+        sektor_valg     = ["Alle Sektorer"] + sorted(df_results["sector"].dropna().unique().tolist())
+        selected_sector = st.selectbox("Velg Sektor:", sektor_valg)
 
-        num_to_show = st.slider("Vis antall kandidater:", 5, len(df_results), 20)
+        num_to_show = st.slider("Vis antall kandidater:", 5, min(50, len(df_results)), min(20, len(df_results)))
 
         st.markdown("---")
         st.subheader("Signal-filter")
@@ -129,7 +140,6 @@ else:
         "CAGR Test (%)", "Max DD Test (%)",
         "why_selected",
     ]
-    # Behold bare kolonner som faktisk finnes
     display_cols = [c for c in display_cols if c in filtered_df.columns]
 
     display_df = filtered_df[display_cols].copy()
@@ -159,7 +169,6 @@ else:
 
     st.markdown("---")
 
-    # --- SCOREBONUSER (expander) ---
     with st.expander("Hva betyr bonuspoengene?"):
         col1, col2, col3 = st.columns(3)
         col1.metric("SMA150-bonus", "+10 p", "Kryss opp over SMA150 nylig + fortsatt over")
@@ -171,10 +180,7 @@ else:
 
     chart_data = filtered_df.reset_index().rename(columns={"index": "Rank"})
 
-    chart_tooltip = [
-        "ticker", "name", "sector",
-        alt.Tooltip("total_score", format=".1f"),
-    ]
+    chart_tooltip = ["ticker", "name", "sector", alt.Tooltip("total_score", format=".1f")]
     for col in ["GoldenX", "VolConf"]:
         if col in chart_data.columns:
             chart_tooltip.append(col)
