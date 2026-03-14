@@ -52,12 +52,14 @@ def hent_data_fra_github():
         # Visningskolonner
         df["V/B Score"]      = df["vb_percentile"].round(1)
         df["Mom Score"]      = df["mom_percentile"].round(1)
-        df["Vol Score"]      = df["vol_percentile"].round(1)
-        df["VB-SL (%)"]      = df["optimal_sl_train"].round(1)
-        df["ATR-SL (%)"]     = df["dynamic_sl_pct"].round(1)
-        df["CAGR Test (%)"]  = df["cagr_test_percent"].round(1)
-        df["Max DD Test (%)"] = df["max_drawdown_test"].round(1)
-        df["ATR(14)"]        = df["atr_14"].round(2)
+        df["Vol Score"]       = df["vol_percentile"].round(1)
+        df["VB-SL (%)"]       = df["optimal_sl_train"].round(1)
+        df["CAGR Test (%)"]   = df["cagr_test_percent"].round(1)
+        df["Max DD Test (%)"]  = df["max_drawdown_test"].round(1)
+        if "dynamic_sl_pct" in df.columns:
+            df["ATR-SL (%)"]  = df["dynamic_sl_pct"].round(1)
+        if "atr_14" in df.columns:
+            df["ATR(14)"]     = df["atr_14"].round(2)
 
         # Boolean-kolonner → lesbart symbol
         for bool_col, label in [("golden_cross", "GoldenX"), ("vol_confirmed_cross50", "VolConf")]:
@@ -169,6 +171,14 @@ else:
 
     chart_data = filtered_df.reset_index().rename(columns={"index": "Rank"})
 
+    chart_tooltip = [
+        "ticker", "name", "sector",
+        alt.Tooltip("total_score", format=".1f"),
+    ]
+    for col in ["GoldenX", "VolConf"]:
+        if col in chart_data.columns:
+            chart_tooltip.append(col)
+
     chart = (
         alt.Chart(chart_data)
         .mark_bar()
@@ -176,11 +186,7 @@ else:
             x=alt.X("Rank:O", axis=None),
             y=alt.Y("total_score:Q", title="Total Score"),
             color=alt.Color("sector:N", title="Sektor"),
-            tooltip=[
-                "ticker", "name", "sector",
-                alt.Tooltip("total_score", format=".1f"),
-                "GoldenX", "VolConf",
-            ],
+            tooltip=chart_tooltip,
         )
         .properties(height=300)
         .interactive()
