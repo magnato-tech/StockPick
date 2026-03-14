@@ -3,7 +3,17 @@ import pandas as pd
 import numpy as np
 import time
 import os
+import requests
 from typing import List, Dict, Any, Tuple
+
+# User-Agent for Wikipedia-forespørsler (pd.read_html uten dette blokkeres ofte)
+WIKIPEDIA_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
 
 # ============================================================
 # KONSTANTER / PARAMETRE
@@ -57,10 +67,13 @@ WEIGHTS = {
 def _scrape_index_table(url: str) -> pd.DataFrame:
     """
     Forsøker å hente konstituenttabell fra en Wikipedia-side.
+    Bruker requests med User-Agent for å unngå blokkering (GitHub Actions IP-er).
     Returnerer DataFrame med kolonner [ticker, name, sector], eller tom DataFrame.
     """
     try:
-        tables = pd.read_html(url)
+        response = requests.get(url, headers=WIKIPEDIA_HEADERS, timeout=30)
+        response.raise_for_status()
+        tables = pd.read_html(response.text)
     except Exception as e:
         print(f"  Feil ved henting fra {url}: {e}")
         return pd.DataFrame()
@@ -125,13 +138,16 @@ def get_master_ticker_list() -> pd.DataFrame:
         print(f"-> Liste hentet fra cache ({len(df)} tickers).")
         return df
 
-    print("-> Fallback: prøver bare S&P 500.")
+    print("-> Fallback: prøver bare S&P 500 med requests.")
     try:
-        sp500_df = pd.read_html(SP500_URL)[0]
+        response = requests.get(SP500_URL, headers=WIKIPEDIA_HEADERS, timeout=30)
+        response.raise_for_status()
+        sp500_df = pd.read_html(response.text)[0]
         df = sp500_df[["Symbol", "Security", "GICS Sector"]].rename(
             columns={"Symbol": "ticker", "Security": "name", "GICS Sector": "sector"}
         )
         df["ticker"] = df["ticker"].str.replace(".", "-", regex=False)
+        print(f"-> Fallback S&P 500: {len(df)} tickers.")
         return df
     except Exception as e:
         print(f"-> KRITISK FEIL: Ingen masterliste funnet. Detaljer: {e}")
@@ -438,13 +454,16 @@ def run_full_screener():
 
     # 1) Masterliste
     ticker_list_df = get_master_ticker_list()
+    print(f"\nMasterliste: {len(ticker_list_df)} tickers lastet.")
     if ticker_list_df.empty:
+        print("KRITISK: Ingen tickers funnet. Avslutter.")
         return pd.DataFrame()
 
     tickers     = ticker_list_df["ticker"].tolist()
     ticker_meta = ticker_list_df.set_index("ticker").to_dict("index")
     total_tickers = len(tickers)
     print(f"\nStarter screening av {total_tickers} aksjer (S&P 1500).")
+    print(f"Eksempel-tickers: {tickers[:5]}")
 
     # 2) Pass 1: Gate på SMA50-cross (batch-nedlasting)
     total_batches = (total_tickers + BATCH_SIZE - 1) // BATCH_SIZE
